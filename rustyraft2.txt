@@ -995,8 +995,7 @@ SafeNotify("🔥 RUSTY RAFT  v1.0 🔥",
     "📌 Chạm ⚙️ góc phải để mở menu", 10)
 
 DebugLog("========================================")
-DebugLog("RUSTY RAFT 
- v" .. getgenv().ScriptVersion)
+DebugLog("RUSTY RAFT v" .. getgenv().ScriptVersion)
 DebugLog("Owner: " .. getgenv().Owner)
 DebugLog("GUI Name: " .. GUI_NAME)
 DebugLog("Status: RUNNING")

@@ -129,15 +129,17 @@ local FOVCircle = nil
 local function CreateFOVCircle()
     pcall(function()
         if FOVCircle then FOVCircle:Remove() end
-        FOVCircle = Drawing.new("Circle")
-        if FOVCircle then
-            FOVCircle.Visible = Settings.ESPEnabled
-            FOVCircle.Radius = Settings.AimFOV
-            FOVCircle.Thickness = 2
-            FOVCircle.Color = Color3.fromRGB(255, 0, 0)
-            FOVCircle.Filled = false
-            FOVCircle.Transparency = 1
-            FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        if Drawing then
+            FOVCircle = Drawing.new("Circle")
+            if FOVCircle then
+                FOVCircle.Visible = Settings.ESPEnabled
+                FOVCircle.Radius = Settings.AimFOV
+                FOVCircle.Thickness = 2
+                FOVCircle.Color = Color3.fromRGB(255, 0, 0)
+                FOVCircle.Filled = false
+                FOVCircle.Transparency = 1
+                FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            end
         end
     end)
 end
@@ -227,106 +229,208 @@ local function GetItems()
 end
 
 -- ============================================================================
---  PHẦN 6: ESP SYSTEM (MOBILE - HIGHLIGHT THUẦN CHỐNG QUÉT)
+--  PHẦN 6: ESP SYSTEM (HIỂN THỊ QUA TƯỜNG)
 -- ============================================================================
 
-local ESPHighlights = {}
-local ItemHighlights = {}
+local ESPObjects = {}
+local ItemESPObjects = {}
 local RainbowHue = 0
 
+-- Hàm lấy màu Rainbow
 local function GetRainbowColor()
     RainbowHue = (RainbowHue + 0.005) % 1
     return Color3.fromHSV(RainbowHue, 1, 1)
 end
 
-local function GetHealthColor(percent)
-    return Color3.fromRGB(255 * (1 - percent), 255 * percent, 0)
-end
-
--- ESP cho NPC
+-- Tạo ESP object cho NPC
 local function CreateNPCESP(npc)
-    if ESPHighlights[npc] then return end
+    if ESPObjects[npc] then return end
+    
+    local espData = {
+        Box = nil,
+        Text = nil,
+        HealthBar = nil,
+        Tracer = nil
+    }
+    
     pcall(function()
-        local highlight = Instance.new("Highlight")
-        highlight.Name = "RustyNPC"
-        highlight.FillTransparency = 1
-        highlight.OutlineTransparency = 0
-        highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
-        highlight.Adornee = npc
-        highlight.Parent = npc
-        ESPHighlights[npc] = highlight
+        if Drawing then
+            espData.Box = Drawing.new("Square")
+            espData.Text = Drawing.new("Text")
+            espData.HealthBar = Drawing.new("Line")
+            
+            if espData.Box then
+                espData.Box.Thickness = 2
+                espData.Box.Filled = false
+            end
+            if espData.Text then
+                espData.Text.Size = 12
+                espData.Text.Center = true
+                espData.Text.Outline = true
+                espData.Text.OutlineColor = Color3.fromRGB(0, 0, 0)
+            end
+            if espData.HealthBar then
+                espData.HealthBar.Thickness = 2
+            end
+        end
     end)
+    
+    ESPObjects[npc] = espData
 end
 
+-- Update ESP cho NPC
 local function UpdateNPCESP()
-    if not getgenv().Running then return end
+    if not Settings.ESPEnabled or not getgenv().Running then
+        return
+    end
     
-    for npc, highlight in pairs(ESPHighlights) do
+    for npc, data in pairs(ESPObjects) do
+        -- Kiểm tra an toàn trước khi xử lý
         local isValid = npc and npc.Parent and npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid")
         if not isValid then
-            pcall(function() highlight:Destroy() end)
-            ESPHighlights[npc] = nil
+            pcall(function()
+                if data.Box then data.Box:Remove() end
+                if data.Text then data.Text:Remove() end
+                if data.HealthBar then data.HealthBar:Remove() end
+            end)
+            ESPObjects[npc] = nil
         else
-            local hum = npc.Humanoid
             local hrp = npc.HumanoidRootPart
-            local distance = (hrp.Position - Camera.CFrame.Position).Magnitude
-            local hpPercent = hum.Health / hum.MaxHealth
+            local hum = npc.Humanoid
             
-            highlight.Enabled = Settings.ESPEnabled and (distance < Settings.MaxDistance)
-            
-            if Settings.ESPEnabled then
-                if Settings.RainbowBox then
-                    highlight.OutlineColor = GetRainbowColor()
-                else
-                    highlight.OutlineColor = GetHealthColor(hpPercent)
-                end
+            -- Kiểm tra hrp có hợp lệ không
+            if not hrp or not hrp.Position then
+                pcall(function()
+                    if data.Box then data.Box:Remove() end
+                    if data.Text then data.Text:Remove() end
+                    if data.HealthBar then data.HealthBar:Remove() end
+                end)
+                ESPObjects[npc] = nil
+            else
+                local screenPos, isOnScreen = pcall(Camera.WorldToViewportPoint, Camera, hrp.Position)
+                if not isOnScreen then screenPos = nil end
                 
-                -- Đổi độ trong suốt theo khoảng cách
-                local alpha = 1 - math.clamp(distance / Settings.MaxDistance, 0, 1)
-                highlight.OutlineTransparency = 0.3 * (1 - alpha)
+                if screenPos and type(screenPos) == "Vector3" then
+                    local distance = (hrp.Position - Camera.CFrame.Position).Magnitude
+                    local pos = screenPos
+                    
+                    if distance < Settings.MaxDistance then
+                        local scale = 3 / (pos.Z / 5)
+                        local boxSize = Vector2.new(scale * 2.5, scale * 3.5)
+                        
+                        -- Box ESP
+                        if Settings.ShowBox and data.Box then
+                            data.Box.Visible = true
+                            data.Box.Size = boxSize
+                            data.Box.Position = Vector2.new(pos.X - boxSize.X/2, pos.Y - boxSize.Y/2)
+                            
+                            if Settings.RainbowBox then
+                                data.Box.Color = GetRainbowColor()
+                            else
+                                local hpPercent = hum.Health / hum.MaxHealth
+                                data.Box.Color = hpPercent > 0.5 and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+                            end
+                        elseif data.Box then
+                            data.Box.Visible = false
+                        end
+                        
+                        -- Text ESP (Name + Distance + Health)
+                        if data.Text then
+                            local infoText = ""
+                            if Settings.ShowName then infoText = infoText .. (npc.Name or "NPC") end
+                            if Settings.ShowDistance then infoText = infoText .. " [" .. math.floor(distance) .. "m]" end
+                            if Settings.ShowHealth then infoText = infoText .. " ❤️" .. math.floor(hum.Health)
+                            end
+                            
+                            if infoText ~= "" then
+                                data.Text.Visible = true
+                                data.Text.Text = infoText
+                                data.Text.Position = Vector2.new(pos.X, pos.Y - boxSize.Y/2 - 12)
+                                data.Text.Color = Color3.fromRGB(255, 255, 255)
+                            else
+                                data.Text.Visible = false
+                            end
+                        end
+                        
+                        -- Health Bar
+                        if Settings.ShowHealthBar and data.HealthBar then
+                            local hpPercent = hum.Health / hum.MaxHealth
+                            data.HealthBar.Visible = true
+                            data.HealthBar.From = Vector2.new(pos.X - boxSize.X/2, pos.Y + boxSize.Y/2 + 5)
+                            data.HealthBar.To = Vector2.new(pos.X - boxSize.X/2 + boxSize.X * hpPercent, pos.Y + boxSize.Y/2 + 5)
+                            data.HealthBar.Color = Color3.fromRGB(255 * (1 - hpPercent), 255 * hpPercent, 0)
+                        elseif data.HealthBar then
+                            data.HealthBar.Visible = false
+                        end
+                    else
+                        if data.Box then data.Box.Visible = false end
+                        if data.Text then data.Text.Visible = false end
+                        if data.HealthBar then data.HealthBar.Visible = false end
+                    end
+                else
+                    if data.Box then data.Box.Visible = false end
+                    if data.Text then data.Text.Visible = false end
+                    if data.HealthBar then data.HealthBar.Visible = false end
+                end
             end
         end
     end
 end
 
--- ESP cho Item
-local function CreateItemESP(item)
-    if ItemHighlights[item] then return end
-    pcall(function()
-        local highlight = Instance.new("Highlight")
-        highlight.Name = "RustyItem"
-        highlight.FillTransparency = 1
-        highlight.OutlineTransparency = 0.2
-        highlight.OutlineColor = Color3.fromRGB(0, 255, 255)
-        highlight.Adornee = item
-        highlight.Parent = item
-        ItemHighlights[item] = highlight
-    end)
-end
-
+-- Update ESP cho Item
 local function UpdateItemESP()
-    if not getgenv().Running then return end
-    for item, highlight in pairs(ItemHighlights) do
+    if not Settings.ESPEnabled or not Settings.ShowItem or not getgenv().Running then
+        for _, text in pairs(ItemESPObjects) do
+            pcall(function() if text then text.Visible = false end end)
+        end
+        return
+    end
+    
+    for item, text in pairs(ItemESPObjects) do
         if not item or not item.Parent then
-            pcall(function() highlight:Destroy() end)
-            ItemHighlights[item] = nil
+            pcall(function() if text then text:Remove() end end)
+            ItemESPObjects[item] = nil
         else
-            highlight.Enabled = Settings.ESPEnabled and Settings.ShowItem
+            local position = nil
+            if item:IsA("Tool") then
+                position = item.Handle and item.Handle.Position or item.Position
+            else
+                position = item.Position
+            end
+            
+            if position then
+                local screenPos, isOnScreen = pcall(Camera.WorldToViewportPoint, Camera, position)
+                if screenPos and isOnScreen then
+                    text.Visible = true
+                    text.Text = "📦 " .. item.Name
+                    text.Position = Vector2.new(screenPos.X, screenPos.Y)
+                    text.Color = Color3.fromRGB(0, 255, 255)
+                else
+                    text.Visible = false
+                end
+            else
+                text.Visible = false
+            end
         end
     end
 end
 
+-- Cleanup tất cả ESP (giải phóng bộ nhớ)
 local function CleanupAllESP()
-    DebugLog("Cleaning up ESP...")
-    for _, highlight in pairs(ESPHighlights) do
-        pcall(function() highlight:Destroy() end)
+    DebugLog("Cleaning up all ESP objects...")
+    for npc, data in pairs(ESPObjects) do
+        pcall(function()
+            if data.Box then data.Box:Remove() end
+            if data.Text then data.Text:Remove() end
+            if data.HealthBar then data.HealthBar:Remove() end
+        end)
     end
-    for _, highlight in pairs(ItemHighlights) do
-        pcall(function() highlight:Destroy() end)
+    for _, text in pairs(ItemESPObjects) do
+        pcall(function() if text then text:Remove() end end)
     end
-    ESPHighlights = {}
-    ItemHighlights = {}
-    DebugLog("ESP cleanup done")
+    ESPObjects = {}
+    ItemESPObjects = {}
+    DebugLog("ESP cleanup completed")
 end
 
 -- ============================================================================
@@ -471,16 +575,36 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Task 3: ESP
+-- Task 3: Tạo và cập nhật ESP
 task.spawn(function()
     while getgenv().Running do
         pcall(function()
+            -- Tạo ESP cho NPC mới
             for _, npc in pairs(GetNPCs()) do
-                CreateNPCESP(npc)
+                if not ESPObjects[npc] then
+                    CreateNPCESP(npc)
+                end
             end
+            
+            -- Tạo ESP cho Item mới
             for _, item in pairs(GetItems()) do
-                CreateItemESP(item)
+                if not ItemESPObjects[item] then
+                    local text = nil
+                    pcall(function()
+                        if Drawing then
+                            text = Drawing.new("Text")
+                        end
+                    end)
+                    if text then
+                        text.Size = 11
+                        text.Center = true
+                        text.Outline = true
+                        text.Visible = false
+                        ItemESPObjects[item] = text
+                    end
+                end
             end
+            
             UpdateNPCESP()
             UpdateItemESP()
         end)
@@ -495,7 +619,8 @@ end)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = GUI_NAME
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = CoreGui
 
 -- Main Frame
 local MainFrame = Instance.new("Frame")
@@ -694,7 +819,7 @@ local function AddToggle(parent, text, settingKey, order)
         status.Text = Settings[settingKey] and "ON" or "OFF"
         status.TextColor3 = Settings[settingKey] and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
         if settingKey == "ESPEnabled" and FOVCircle then
-            FOVCircle.Visible = Settings.ESPEnabled
+            pcall(function() FOVCircle.Visible = Settings.ESPEnabled end)
         end
     end)
 end
@@ -744,7 +869,7 @@ local function AddSlider(parent, text, settingKey, minVal, maxVal, order)
             label.Text = text .. ": " .. string.format("%.2f", Settings[settingKey])
             box.PlaceholderText = tostring(Settings[settingKey])
             if settingKey == "AimFOV" and FOVCircle then
-                FOVCircle.Radius = Settings.AimFOV
+                pcall(function() FOVCircle.Radius = Settings.AimFOV end)
             end
             if settingKey == "UpdateInterval" then
                 Settings.CacheDuration = math.min(0.5, Settings.UpdateInterval * 2)
@@ -807,7 +932,7 @@ ResetButton.MouseButton1Click:Connect(function()
     Settings.HumanizeAim = true
     Settings.UpdateInterval = 0.12
     Settings.CacheDuration = 0.5
-    if FOVCircle then FOVCircle.Radius = 150 end
+    if FOVCircle then pcall(function() FOVCircle.Radius = 150 end) end
     SafeNotify("RUSTY RAFT", "Đã reset về cài đặt mặc định!", 2)
     DebugLog("Settings reset to default")
 end)
